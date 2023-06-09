@@ -31,7 +31,8 @@ import {
   CosmosMsg,
   IBC_TRANSFER_TYPE,
   WASM_TYPE,
-  WasmHookMsg
+  WasmHookMsg,
+  ChainType
 } from "./types";
 
 import erc20Abi from "./abi/erc20.json";
@@ -71,6 +72,20 @@ export class Squid {
       baseUrl: config?.baseUrl || baseUrl,
       ...config
     };
+  }
+
+  private getValidChainData(chainId: number | string): ChainData {
+    const chainData = getChainData(this.chains as ChainData[], chainId);
+    if (!chainData) {
+      throw new SquidError({
+        message: `Chain data not found. Invalid chain id ${chainId}`,
+        errorType: ErrorType.ValidationError,
+        logging: this.config.logging,
+        logLevel: this.config.logLevel
+      });
+    }
+
+    return chainData!;
   }
 
   private validateInit() {
@@ -156,30 +171,10 @@ export class Squid {
   }
 
   private validateRouteParams(params: RouteParams): RouteParamsData {
-    const { fromChain, toChain, fromToken, toToken } = params;
+    const { toChain, fromToken, toToken } = params;
 
-    const _fromChain = getChainData(
-      this.chains as ChainData[],
-      params.fromChain
-    );
-    if (!_fromChain) {
-      throw new SquidError({
-        message: `fromChain not found for ${fromChain}`,
-        errorType: ErrorType.ValidationError,
-        logging: this.config.logging,
-        logLevel: this.config.logLevel
-      });
-    }
-
-    const _toChain = getChainData(this.chains as ChainData[], toChain);
-    if (!_toChain) {
-      throw new SquidError({
-        message: `toChain not found for ${fromChain}`,
-        errorType: ErrorType.ValidationError,
-        logging: this.config.logging,
-        logLevel: this.config.logLevel
-      });
-    }
+    const _fromChain = this.getValidChainData(params.fromChain);
+    const _toChain = this.getValidChainData(toChain);
 
     const fromProvider = new ethers.providers.JsonRpcProvider(_fromChain.rpc);
 
@@ -312,10 +307,11 @@ export class Squid {
     }
 
     // handle cosmos case
-    if (
-      signer instanceof SigningStargateClient ||
-      signer.constructor.name === "SigningStargateClient"
-    ) {
+    const isCosmosChain =
+      this.getValidChainData(route.params.fromChain).chainType ==
+      ChainType.Cosmos;
+
+    if (isCosmosChain || signer instanceof SigningStargateClient) {
       return await this.executeRouteCosmos(
         signer as SigningStargateClient,
         signerAddress!,
@@ -635,19 +631,7 @@ export class Squid {
       });
     }
 
-    const chain = getChainData(
-      this.chains as ChainData[],
-      token.chainId as number
-    );
-    if (!chain) {
-      throw new SquidError({
-        message: `Chain not found for ${token.chainId}`,
-        errorType: ErrorType.ValidationError,
-        logging: this.config.logging,
-        logLevel: this.config.logLevel
-      });
-    }
-
+    const chain = this.getValidChainData(token.chainId as number);
     const provider = new ethers.providers.JsonRpcProvider(chain.rpc);
     const contract = new ethers.Contract(token.address, erc20Abi, provider);
     return await contract.allowance(owner, spender);
@@ -677,18 +661,7 @@ export class Squid {
       });
     }
 
-    const chain = getChainData(
-      this.chains as ChainData[],
-      token.chainId as number | string
-    );
-    if (!chain) {
-      throw new SquidError({
-        message: `Chain not found for ${token.chainId}`,
-        errorType: ErrorType.ValidationError,
-        logging: this.config.logging,
-        logLevel: this.config.logLevel
-      });
-    }
+    const _ = this.getValidChainData(token.chainId as number | string);
 
     const contract = new ethers.Contract(token.address, erc20Abi, signer);
     return await contract.approve(
